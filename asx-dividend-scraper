@@ -144,7 +144,7 @@ def plotDividends(df):  # Take a dividend data frame and plot some stuff
     plot.bar(df_byCompany.index, df_byCompany['TotalPayment'], label='TotalPayment', color='steelblue')
     plot.bar(df_byCompany.index, df_byCompany['TotalFrankingCredits'],bottom=df_byCompany['TotalPayment'], label='TotalFrankingCredits', color='darkorange')
     _ = plot.legend(fontsize=10)
-    _ = plot.xlabel('Month')
+    _ = plot.xlabel('ASX Code')
     _ = plot.ylabel('Forecast Dividends per Year [AUD]')
     _ = plot.annotate('Total forecast annual dividends =  %d with %d worth of franking credits' % (df_byCompany['TotalPayment'].sum(), df_byCompany['TotalFrankingCredits'].sum()), xy=(0.1,0.75), xycoords = 'figure fraction')
     

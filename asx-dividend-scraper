@@ -1,0 +1,193 @@
+# Language: Python
+
+# This program takes a porfolio of shares (ASX codes and corresponding qty)
+# It scrapes the past dividends from the ASX website.
+# It then extrapolates the dividends into the future.
+# Note: This does not disregard special dividends etc
+# PAST DIVENDEND HISTORY IS NO GUARANTEE OF THE FUTURE 
+
+
+
+# To run for first time, open python prompt...
+# type the following: pip install requests
+# Repeat for any other missing dependencies
+
+import requests
+import datetime
+import pandas as pd
+import collections
+from bs4 import BeautifulSoup
+import matplotlib.pyplot as plot
+
+# This is a named tuple to store individual dividends
+Dividend = collections.namedtuple('Dividend', ['Code', 'CompanyName', 'DivAmountPerShare', 'ExDivDate', 'RecordDate', 'DatePayable', 'PercentFranked', 'Type', 'FurtherInformation', 'TotalPayment', 'TotalFrankingCredits'])
+
+#Function definitions start here:
+
+def webScrape(tickers):
+    # This function takes a list of maximum 10 ASX codes (tickers) and returns the raw web data (soup).
+    # Scaped from ASX website
+    basepath = 'https://www.asx.com.au/asx/markets/dividends.do?by=asxCodes&asxCodes='
+    page = requests.get(basepath + '+'.join(tickers))
+    soup = BeautifulSoup(page.text, features="lxml")
+    return soup
+
+
+
+def extractDividends(soup, dividendByCompany):
+    #This function takes raw web data (soup) and parses it into a list of dividend objects
+    dividendTable = soup.find('table', id="dividends")
+
+    for rowIndex, tr in enumerate(dividendTable.findAll('tr')):
+        if rowIndex == 0:
+            continue
+        rowList = []
+        divTicker = tr.find('th').text
+        divTicker = divTicker.replace('\t','')   # Remove tabs, new lines, nonbreaking spaces and other garbage
+        divTicker = divTicker.replace('\n','')
+        divTicker = divTicker.replace('\r','')
+        divTicker = divTicker.replace('\xa0','')   # a nonbeaking space and asterisx is added when a price-sensitive annoucement has occured. Remove.
+        divTicker = divTicker.replace('*','')
+        rowList.append(divTicker)
+        
+        for td in tr.findAll('td'):
+            text = td.text
+            text = text.replace('\t','')
+            text = text.replace('\n','')
+            text = text.replace('\r','')
+            rowList.append(text)        
+            
+        rowList[2] = float(rowList[2][:-1]) / 100   #convert string for 'cents' to a float for dollars
+        
+        for i in range(3,6):  #convert all the dates to datetime objects
+            dd = int(rowList[i][0:2])
+            mm = int(rowList[i][3:5])
+            yyyy = int(rowList[i][6:11])
+            rowList[i] = datetime.date(yyyy,mm,dd)
+            
+        totalPayment = rowList[2] * portfolio[rowList[0]] # Dividend amount times number of shares
+        rowList.append(totalPayment) 
+        frankingPercent = float(rowList[6][:-1]) / 100
+        totalFrankingCredits = frankingPercent * totalPayment * 30 / 70
+        rowList.append(totalFrankingCredits)
+        
+        rowDividend = Dividend._make(rowList)
+        
+        partialDividendByCompany = dividendByCompany.get(divTicker,[])
+        partialDividendByCompany.append(rowDividend)           
+        dividendByCompany[divTicker] = partialDividendByCompany
+    
+    return dividendByCompany
+
+
+
+def forecastDividends(dividendByCompany):
+    # This function forecasts the future dividends from past dividends.
+    # Basically it assumes the same dividend will be paid, one year from last.
+    # Duplicates (past dividend at same time of year as a future dividend) are removed
+    forecastDividends = []
+    for ticker in dividendByCompany.keys():   # Iterate over all ASX codes (tickers) in the portfolio
+        dividends = dividendByCompany[ticker]
+        paymentDates = []
+        for dividend in dividends:
+            paymentDates.append(dividend.DatePayable)
+        
+        for dividend in dividends:
+            timeDiffs = []
+            for paymentDate in paymentDates:
+                timeDiff = abs(((dividend.DatePayable + datetime.timedelta(days=365)) - paymentDate).days)
+                timeDiffs.append(timeDiff)
+            if min(timeDiffs) > 30:  #Need the past dividend, plus a year, to be at least 30 days away from other dividends
+                if(dividend.DatePayable < datetime.date.today()):
+                    forecastDividend = Dividend._make(
+                            [dividend.Code,
+                             dividend.CompanyName,
+                             dividend.DivAmountPerShare,
+                             dividend.ExDivDate + datetime.timedelta(days=365),   # Forecast by adding a year
+                             dividend.RecordDate + datetime.timedelta(days=365),   # Forecast by adding a year
+                             dividend.DatePayable + datetime.timedelta(days=365),   # Forecast by adding a year
+                             dividend.PercentFranked,
+                             dividend.Type,
+                             "Forecast based on last year: " + dividend.FurtherInformation,
+                             dividend.TotalPayment,
+                             dividend.TotalFrankingCredits]                       
+                            )
+                    forecastDividends.append(forecastDividend)
+                else:
+                    forecastDividends.append(dividend)     
+    return forecastDividends
+
+
+
+def getdividendsForPortfolio(portfolio):
+    #This function takes a portfolio (dictionary type) and returns a list of Dividend objects (named tuples)
+    dividendByCompany={} # Start with an empty dictionary
+    x=0
+    y=len(portfolio)
+    for i in range(x,y,10):  #Split into chunks of 10
+        x=i
+        subList = list(portfolio.keys())[x:x+10]  # Extract a list, max length 10
+        soup = webScrape(subList) # Go and scrape the raw web data for this subList
+        dividendByCompany = extractDividends(soup, dividendByCompany) # Parse the web data into a list of dividend class objects (named tuples). Append this list onto the list that is passed to the function.
+    return dividendByCompany
+
+
+
+def plotDividends(df):  # Take a dividend data frame and plot some stuff
+    
+    df.set_index('DatePayable')
+    df.index = pd.to_datetime(df['DatePayable'])
+    
+    df_byCompany=df.groupby(df['Code']).sum().sort_values(by=(['TotalPayment'] + ['TotalFrankingCredits']))
+    
+    plot.figure(figsize=(12,6))
+    plot.bar(df_byCompany.index, df_byCompany['TotalPayment'], label='TotalPayment', color='steelblue')
+    plot.bar(df_byCompany.index, df_byCompany['TotalFrankingCredits'],bottom=df_byCompany['TotalPayment'], label='TotalFrankingCredits', color='darkorange')
+    _ = plot.legend(fontsize=10)
+    _ = plot.xlabel('Month')
+    _ = plot.ylabel('Forecast Dividends per Year [AUD]')
+    _ = plot.annotate('Total forecast annual dividends =  %d with %d worth of franking credits' % (df_byCompany['TotalPayment'].sum(), df_byCompany['TotalFrankingCredits'].sum()), xy=(0.1,0.75), xycoords = 'figure fraction')
+    
+    df_byMonth = df.groupby(pd.Grouper( freq='1M')).sum() # groupby each 1 month
+    df_byMonth.index = df_byMonth.index.strftime('%Y-%m')
+    
+    plot.figure(figsize=(12,6))
+    plot.bar(df_byMonth.index, df_byMonth['TotalPayment'], label='TotalPayment', color='steelblue')
+    plot.bar(df_byMonth.index, df_byMonth['TotalFrankingCredits'],bottom=df_byMonth['TotalPayment'], label='TotalFrankingCredits', color='darkorange')
+    plot.axhline(df_byMonth['TotalPayment'].mean(), xmin=0, xmax=1, hold=None, ls='dashed', color='teal')
+    plot.axhline(df_byMonth['TotalPayment'].mean()+df_byMonth['TotalFrankingCredits'].mean(), xmin=0, xmax=1, hold=None, ls='dashed', color='chocolate')
+    _ = plot.xticks(rotation=30)
+    _ = plot.legend(fontsize=10)
+    _ = plot.xlabel('Month')
+    _ = plot.ylabel('Forecast Dividends per Month [AUD]')
+
+
+
+#Start of main code
+    
+# The following is a dictionary. The key is the ASX codes, the corresponding values are the number of shares held.
+portfolio = {
+'AFI':	12961,
+'CTD':	1820,
+'CKF':	7419,
+'SOL':	1840,
+'COH':	180,
+'RMD':	2740,
+'VOC':	6830,
+'ONT':	2355,
+'HPI':	9485,
+'VGS':	2800,
+'RHC':	300,
+'NDQ':	3950,
+'SHV':	7871,
+'BWX':	3055,
+'FLC':	12000,
+'VDHG':	970,
+'VAE':	931
+}
+
+# Calling the functions as defined herein
+dividendByCompany = getdividendsForPortfolio(portfolio)
+forecastDividends = forecastDividends(dividendByCompany)
+df = pd.DataFrame.from_records(forecastDividends,columns=forecastDividends[0]._fields)    # Convert list of dividends to data frame
+plotDividends(df)

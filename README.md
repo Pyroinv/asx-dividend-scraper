@@ -1,2 +1,2 @@
 # asx-dividend-scraper
-Scrapes dividends and forecasts future dividend cashflow
+Scrapes dividends from the ASX and forecasts future dividend cashflow

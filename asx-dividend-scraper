@@ -1,12 +1,13 @@
 # Language: Python
+"""
+@author: EarlyFreedom
+"""
 
 # This program takes a porfolio of shares (ASX codes and corresponding qty)
 # It scrapes the past dividends from the ASX website.
 # It then extrapolates the dividends into the future.
 # Note: This does not disregard special dividends etc
 # PAST DIVENDEND HISTORY IS NO GUARANTEE OF THE FUTURE 
-
-
 
 # To run for first time, open python prompt...
 # type the following: pip install requests
@@ -22,7 +23,45 @@ import matplotlib.pyplot as plot
 # This is a named tuple to store individual dividends
 Dividend = collections.namedtuple('Dividend', ['Code', 'CompanyName', 'DivAmountPerShare', 'ExDivDate', 'RecordDate', 'DatePayable', 'PercentFranked', 'Type', 'FurtherInformation', 'TotalPayment', 'TotalFrankingCredits'])
 
+
+# The following is a dictionary. The key is the ASX codes, the corresponding values are the number of shares held.
+portfolio = {
+'AFI':	12961,
+'CTD':	1823,
+'CKF':	7419,
+'SOL':	1840,
+'COH':	180,
+'RMD':	2740,
+'VOC':	6833,
+'ONT':	2350,
+'HPI':	9484,
+'VGS':	2719,
+'RHC':	270,
+'NDQ':	3940,
+'CGS':	9200,
+'SHV':	7871,
+'BWX':	3056,
+'FLC':	12000,
+'VDHG':	971,
+'VAE':	932
+}
+
+
+
+
 #Function definitions start here:
+
+
+def getdividendsForPortfolio(portfolio):
+    #This function takes a portfolio (dictionary type) and returns a list of Dividend objects (named tuples)
+    dividendByCompany={} # Start with an empty dictionary
+    for i in range(0, len(portfolio), 10):
+        subList = list(portfolio.keys())[i:i+10]  # Extract a list, max length 10
+        soup = webScrape(subList) # Go and scrape the raw web data for this subList
+        dividendByCompany.update(extractDividends(soup)) # Parse the web data into a list of dividend class objects (named tuples). Append this list onto the list that is passed to the function.
+    return dividendByCompany
+
+
 
 def webScrape(tickers):
     # This function takes a list of maximum 10 ASX codes (tickers) and returns the raw web data (soup).
@@ -34,8 +73,10 @@ def webScrape(tickers):
 
 
 
-def extractDividends(soup, dividendByCompany):
+def extractDividends(soup):
     #This function takes raw web data (soup) and parses it into a list of dividend objects
+    dividendByCompany = {}
+
     dividendTable = soup.find('table', id="dividends")
 
     for rowIndex, tr in enumerate(dividendTable.findAll('tr')):
@@ -43,18 +84,13 @@ def extractDividends(soup, dividendByCompany):
             continue
         rowList = []
         divTicker = tr.find('th').text
-        divTicker = divTicker.replace('\t','')   # Remove tabs, new lines, nonbreaking spaces and other garbage
-        divTicker = divTicker.replace('\n','')
-        divTicker = divTicker.replace('\r','')
-        divTicker = divTicker.replace('\xa0','')   # a nonbeaking space and asterisx is added when a price-sensitive annoucement has occured. Remove.
-        divTicker = divTicker.replace('*','')
+
+        divTicker = divTicker.translate(str.maketrans('','','\t\n\r\xa0*')) # Remove tabs, new lines, carriage return, nonbreaking spaces and asterisx
         rowList.append(divTicker)
         
         for td in tr.findAll('td'):
             text = td.text
-            text = text.replace('\t','')
-            text = text.replace('\n','')
-            text = text.replace('\r','')
+            text = text.translate(str.maketrans('','','\t\n\r\xa0*')) # Remove tabs, new lines, carriage return, nonbreaking spaces and asterisx
             rowList.append(text)        
             
         rowList[2] = float(rowList[2][:-1]) / 100   #convert string for 'cents' to a float for dollars
@@ -119,18 +155,6 @@ def forecastDividends(dividendByCompany):
 
 
 
-def getdividendsForPortfolio(portfolio):
-    #This function takes a portfolio (dictionary type) and returns a list of Dividend objects (named tuples)
-    dividendByCompany={} # Start with an empty dictionary
-    x=0
-    y=len(portfolio)
-    for i in range(x,y,10):  #Split into chunks of 10
-        x=i
-        subList = list(portfolio.keys())[x:x+10]  # Extract a list, max length 10
-        soup = webScrape(subList) # Go and scrape the raw web data for this subList
-        dividendByCompany = extractDividends(soup, dividendByCompany) # Parse the web data into a list of dividend class objects (named tuples). Append this list onto the list that is passed to the function.
-    return dividendByCompany
-
 
 
 def plotDividends(df):  # Take a dividend data frame and plot some stuff
@@ -144,7 +168,7 @@ def plotDividends(df):  # Take a dividend data frame and plot some stuff
     plot.bar(df_byCompany.index, df_byCompany['TotalPayment'], label='TotalPayment', color='steelblue')
     plot.bar(df_byCompany.index, df_byCompany['TotalFrankingCredits'],bottom=df_byCompany['TotalPayment'], label='TotalFrankingCredits', color='darkorange')
     _ = plot.legend(fontsize=10)
-    _ = plot.xlabel('ASX Code')
+    _ = plot.xlabel('Month')
     _ = plot.ylabel('Forecast Dividends per Year [AUD]')
     _ = plot.annotate('Total forecast annual dividends =  %d with %d worth of franking credits' % (df_byCompany['TotalPayment'].sum(), df_byCompany['TotalFrankingCredits'].sum()), xy=(0.1,0.75), xycoords = 'figure fraction')
     
@@ -165,28 +189,6 @@ def plotDividends(df):  # Take a dividend data frame and plot some stuff
 
 #Start of main code
     
-# The following is a dictionary. The key is the ASX codes, the corresponding values are the number of shares held.
-portfolio = {
-'AFI':	12961,
-'CTD':	1820,
-'CKF':	7419,
-'SOL':	1840,
-'COH':	180,
-'RMD':	2740,
-'VOC':	6830,
-'ONT':	2355,
-'HPI':	9485,
-'VGS':	2800,
-'RHC':	300,
-'NDQ':	3950,
-'SHV':	7871,
-'BWX':	3055,
-'FLC':	12000,
-'VDHG':	970,
-'VAE':	931
-}
-
-# Calling the functions as defined herein
 dividendByCompany = getdividendsForPortfolio(portfolio)
 forecastDividends = forecastDividends(dividendByCompany)
 df = pd.DataFrame.from_records(forecastDividends,columns=forecastDividends[0]._fields)    # Convert list of dividends to data frame
